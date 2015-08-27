@@ -11,13 +11,11 @@ type
         value: V
         next:  ref Node[K,V]
 
-    TestA = object
-        nums: array[5,int]
-
 
 echo "(hello)"
 
 var b:ref Table[256, string, int]  # required by tests (somehow)
+discard b
 
 echo "(bye)"
 
@@ -53,8 +51,7 @@ proc indexFromHash(size:int, h:int):int =
 
 method setValueForKey[S, K, V]( t:var Table[S,K,V], k:K, v:V) =
     let index = indexFromHash(S, k.hashFunc)
-    var llist = t.buckets[index]
-    var cur   = llist.head
+    var cur   = t.buckets[index].head
     var prev: ref Node[K,V] = nil
 
     #
@@ -94,8 +91,30 @@ method valueForKey[S,K,V](t:Table[S,K,V], k:K): V =
     raise newException (KeyError, "Invalid key in valueForKey")
 
 
-method removeValueForKey[S, K, V](t:Table[S,K,V], k:K) =
-    echo S
+method removeValueForKey[S, K, V](t: var Table[S,K,V], k:K) =
+    let index = indexFromHash(S, k.hashFunc)
+    var cur   = t.buckets[index].head
+    var prev: ref Node[K,V] = nil
+
+    #
+    # remove on find
+    #
+    while(cur!=nil):
+        if(k == cur.key):
+            var tmp = cur.next
+            if (prev!=nil):
+                prev.next = tmp
+            else:
+                discard t.buckets[index].popLlist()
+            return
+
+        prev = cur
+        cur  = cur.next
+
+    #
+    # not found
+    #   do nothing
+    #
 
 
 when defined(testing):
@@ -114,7 +133,7 @@ when defined(testing):
                 discard t.valueForKey("nonExistent")
 
 
-        test "set value for key":
+        test "set/get value for key":
             ### GIVEN
             ###     empty table
             const arrSize = 256
@@ -127,10 +146,9 @@ when defined(testing):
             let value: int    = 10
             t.setValueForKey(key, value)
 
-            let index = arrSize.indexFromHash(hashFunc(key))
-
             ### THEN
             ###     value matches
+            let index = arrSize.indexFromHash(hashFunc(key))
             check(t.buckets[index].head       != nil)
             check(t.buckets[index].head.value == value)
             check(t.valueForKey(key)          == value)
@@ -144,6 +162,73 @@ when defined(testing):
             ### THEN
             ###     value matches
             require(t.valueForKey(key2) == value2)
+
+
+        test "removeValueForKey":
+            ### GIVEN
+            ###     empty Table
+            var t:ref Table[256, string, int]
+            new(t)
+
+            ### WHEN
+            ###     add value for key
+            ### AND
+            ###     remove key
+            let key:   string = "first"
+            let value: int    = 10
+            t.setValueForKey(key, value)
+            t.removeValueForKey(key)
+
+            ### THEN
+            ###     raise Exception on get value
+            expect(KeyError):
+                discard t.valueForKey(key)
+
+            ### THEN
+            ###     remove again doesn't raise
+            t.removeValueForKey(key)
+
+
+        test "handle collisions in Table buckets":
+            ### GIVEN
+            ###     empty Table
+            const arrSize = 256
+            var t:ref Table[arrSize, string, int]
+            new(t)
+
+            ### GIVEN
+            ###     different keys
+            ###     with matching hashes and indexes
+            let key    = "rat"
+            let key2   = "tar"
+            let value  = 10
+            let value2 = 20
+
+            require(key.hashFunc == key2.hashFunc)
+            require(arrSize.indexFromHash(key.hashFunc) == arrSize.indexFromHash(key2.hashFunc))
+
+            ### WHEN
+            ###     set
+            t.setValueForKey(key, value)
+            t.setValueForKey(key2,value2)
+
+            ### THEN
+            ###     values match expected
+            check(t.valueForKey(key)  == value)
+            check(t.valueForKey(key2) == value2)
+            check(t.valueForKey(key)  != t.valueForKey(key2))
+
+            ### WHEN
+            ###     remove first key
+            t.removeValueForKey(key)
+
+            ### THEN
+            ###     first raises
+            ###     second is available
+            expect (KeyError):
+                discard t.valueForKey(key)
+
+            check(t.valueForKey(key2) == value2)
 
 
         test "hashFunc":
